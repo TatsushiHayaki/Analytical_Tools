@@ -438,7 +438,22 @@ def grab_datainfo(indata, metadata=None, output_dir=False, filename='datainfo.tx
     print('-- datainfo export complete.')
 
 def main():
-  pass
-
+    testdt = pd.DataFrame({
+        'id'              : [0,1,2,3,4,5],
+        'age'             : [30, 10, 40, 30, 60, 80],
+        'gender'          : ['male','male','male','female','female','female'],
+        'osat'            : [np.nan, 9,6,8, 8, 10],
+        'attr_01'         : [np.nan, 8,4,7, np.nan, 10],
+        'attr_02'         : [np.nan, 3,9,np.nan, 7, 5],
+        'attr_03'         : [np.nan, np.nan,np.nan, 1, 5, 9],
+        'wb'              : [np.nan, 1.2, 1.4, 0.6, np.nan, 0.8],
+        'attr03_filter'   : [np.nan, 1,1,1,2,2],
+        "segment"         : [np.nan, 1,1,2,2,2],
+        "segment_txt"     : [np.nan, "mass", "mass", "middle", "middle", "middle"]
+    })
+    proc_freq(testdt, ['attr03_filter', 'attr_03'], byvar='gender')
+    print('='*80)
+    proc_means(testdt, ['osat', 'attr_01', 'attr_02', 'attr_03'], weight='wb', byvar='segment_txt')
+        
 if __name__ == '__main__':
     main()
