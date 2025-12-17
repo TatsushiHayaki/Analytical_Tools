@@ -15,6 +15,38 @@ import os
 from functools import wraps
 from inspect import signature
 
+def dup_respondents_check(indata, varlist, threshold, id='respondent_serial', ip_var='sample_ip', drop_null=True):
+    """ 
+    Identify potentially duplicate respondents based on IP address and selected variables.
+    """
+    import itertools
+    assert threshold <= len(varlist), "Error: threshold should not exceed the number of columns to check"
+    if drop_null:
+        indata = indata[~indata[varlist].isnull().any(axis=1)].copy()  # Drop rows with any null in varlist
+    print(f'Number of records to be inspected: {indata.shape[0]} out of {indata.shape[0]}\n')
+    output = indata[[id]+[ip_var]+varlist].copy()
+    output[f'is_{ip_var}_dup'] = output[ip_var].duplicated(keep=False) # Mark all duplicates as ``True`` for now
+    output['varlist_dup_count'] = np.nan
+    for count in range(threshold, len(varlist)+1):
+        for combination in itertools.combinations(varlist, count):
+            colname = 'dup_cnt=' + str(count) + ', comb=' + '_'.join(combination)
+            dup_series = indata[list(combination)].astype(str).agg('_'.join, axis=1)
+            output.loc[:,colname] = dup_series.duplicated(keep=False) # Mark all duplicates as ``True`` for now
+        output[f'is_dup_count={count}'] = output.filter(like=f'dup_cnt={count}').any(axis=1)
+        output['varlist_dup_count'] = np.where(output[f'is_dup_count={count}']==True, count, output['varlist_dup_count'])
+
+    output['is_varlist_dup'] = output.filter(like='is_dup_count=').any(axis=1)
+    conditions = [
+        (output[f'is_{ip_var}_dup'] == True) & (output['is_varlist_dup'] == True),      # 1 IP Match and Threshold Met
+        (output[f'is_{ip_var}_dup'] == True) & (output['is_varlist_dup'] == False),     # 2 Threshold Met
+        (output[f'is_{ip_var}_dup'] == False) & (output['is_varlist_dup'] == False),    # 3 Threshold Not Met
+    ]
+    values = [1, 2, 3,]
+    output['matched_record'] = np.select(conditions, values)
+    output = output[[id]+[ip_var]+varlist +[f'is_{ip_var}_dup', 'varlist_dup_count', 'is_varlist_dup', 'matched_record']]
+    return output    
+
+
 def print_control(func):
     """
     Decorator to control printed output for proc_means() and proc_freq().
