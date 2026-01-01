@@ -1,51 +1,16 @@
 """
-Last update: Dec-5-2025
+Last update: Jan-1-2026
 Owner: Tatsushi Hayaki
 
 # ToDo: Make 'Q1', 'Q3', 'Median', 'Kurt', 'Skew', 'Range', and other options available
 # ToDo: Address issues for datetime columns
-# This line makes the program very slow -> pd.concat([outdata, raw_data], axis=0, ignore_index=True)
-
 """
 __version__ = '1.2.10'
-
 import numpy as np
 import pandas as pd
 import os
 from functools import wraps
 from inspect import signature
-
-def dup_respondents_check(indata, varlist, threshold, id='respondent_serial', ip_var='sample_ip', drop_null=True):
-    """ 
-    Identify potentially duplicate respondents based on IP address and selected variables.
-    """
-    import itertools
-    assert threshold <= len(varlist), "Error: threshold should not exceed the number of columns to check"
-    if drop_null:
-        indata = indata[~indata[varlist].isnull().any(axis=1)].copy()  # Drop rows with any null in varlist
-    print(f'Number of records to be inspected: {indata.shape[0]} out of {indata.shape[0]}\n')
-    output = indata[[id]+[ip_var]+varlist].copy()
-    output[f'is_{ip_var}_dup'] = output[ip_var].duplicated(keep=False) # Mark all duplicates as ``True`` for now
-    output['varlist_dup_count'] = np.nan
-    for count in range(threshold, len(varlist)+1):
-        for combination in itertools.combinations(varlist, count):
-            colname = 'dup_cnt=' + str(count) + ', comb=' + '_'.join(combination)
-            dup_series = indata[list(combination)].astype(str).agg('_'.join, axis=1)
-            output.loc[:,colname] = dup_series.duplicated(keep=False) # Mark all duplicates as ``True`` for now
-        output[f'is_dup_count={count}'] = output.filter(like=f'dup_cnt={count}').any(axis=1)
-        output['varlist_dup_count'] = np.where(output[f'is_dup_count={count}']==True, count, output['varlist_dup_count'])
-
-    output['is_varlist_dup'] = output.filter(like='is_dup_count=').any(axis=1)
-    conditions = [
-        (output[f'is_{ip_var}_dup'] == True) & (output['is_varlist_dup'] == True),      # 1 IP Match and Threshold Met
-        (output[f'is_{ip_var}_dup'] == True) & (output['is_varlist_dup'] == False),     # 2 Threshold Met
-        (output[f'is_{ip_var}_dup'] == False) & (output['is_varlist_dup'] == False),    # 3 Threshold Not Met
-    ]
-    values = [1, 2, 3,]
-    output['matched_record'] = np.select(conditions, values)
-    output = output[[id]+[ip_var]+varlist +[f'is_{ip_var}_dup', 'varlist_dup_count', 'is_varlist_dup', 'matched_record']]
-    return output    
-
 
 def print_control(func):
     """
@@ -53,24 +18,38 @@ def print_control(func):
     When noprint=False is specified (by default), the wrapped function
     will print the result(s) in a well-formatted manner.
     """
+    # def nan_ints(df):
+    #     """
+    #     Converts float/object columns to nullable integer types
+    #     (i.e., pandas.Int64Dtype) for display when safe to do so.
+    #     Columns containing decimal values will not be converted
+    #     even if they have a float data type.
+    #     """
+    #     df = df.copy()
+    #     varlist = list(df.columns)
+    #     varlist = [v for v in varlist if v not in ('MIN', 'MAX')] # excluding columns you don't apply the function to
+    #     for var in varlist:
+    #         is_float = 'float' in str(df[var].dtype)
+    #         is_object = 'object' in str(df[var].dtype)
+    #         if (is_float or is_object):
+    #             df[var] = df[var].astype("Int64", errors='ignore')
+    #     return df
     def nan_ints(df):
-        """
-        Converts float/object columns to nullable integer types
-        (i.e., pandas.Int64Dtype) for display when safe to do so.
-        Columns containing decimal values will not be converted
-        even if they have a float data type.
-        """
         df = df.copy()
         varlist = list(df.columns)
         varlist = [v for v in varlist if v not in ('MIN', 'MAX')] # excluding columns you don't apply the function to
         for var in varlist:
-            is_float = 'float' in str(df[var].dtype)
-            is_object = 'object' in str(df[var].dtype)
-            if (is_float or is_object):
-                df[var] = df[var].astype("Int64", errors='ignore')
+            s = pd.to_numeric(df[var], errors='coerce')
+            if s.notna().any():
+                if (s.dropna() % 1 == 0).all():
+                    df[var] = s.astype("Int64")
+                else:
+                    df[var] = s
+            else:
+                df[var] = s
         return df
 
-    list_output = True    
+    list_output = True
     def print_grouped(indata, group_cols, recursion_level=0):
         """
         Recursively print a DataFrame grouped by multiple columns.
@@ -92,15 +71,13 @@ def print_control(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         result = func(*args, **kwargs)
-
-        # Collecting arguments for the wrapped function 
+        # Collecting arguments for the wrapped function
         bound = signature(func).bind(*args, **kwargs)
         bound.apply_defaults()
         noprint = bound.arguments['noprint']
         byvar = bound.arguments['byvar']
         nonlocal list_output
-        list_output = kwargs.pop('list_output', True)       
-
+        list_output = kwargs.pop('list_output', True)
         if noprint:
             return result
         if not list_output:
@@ -115,7 +92,6 @@ def print_control(func):
             print_grouped(result, group_cols, 0)
             return
         print(nan_ints(result).to_string(index=False))
-
     return wrapper
 
 @print_control
@@ -186,8 +162,8 @@ def proc_means(indata, varlist, byvar=None, weight=None, where=None,
         byvar = [byvar]
 
     def statistics(indata, varlist, group_label='ALL'):
-        outdata = pd.DataFrame(columns=['Group', 'Variable', 'N', 'NMISS', 'MEAN', 'VAR', 'STDDEV', 'SE', 'MIN', 'MAX'])
-
+        # outdata = pd.DataFrame(columns=['Group', 'Variable', 'N', 'NMISS', 'MEAN', 'VAR', 'STDDEV', 'SE', 'MIN', 'MAX'])
+        outdata = pd.DataFrame()
         for var in varlist:
             ma = np.ma.MaskedArray(indata[var], mask=indata[var].isna())
             w  = np.ma.MaskedArray(indata[weight], mask=indata[var].isna())
@@ -234,7 +210,8 @@ def proc_means(indata, varlist, byvar=None, weight=None, where=None,
         result = statistics(indata, varlist)[['Group', 'Variable'] + items]
         return result
 
-    out = pd.DataFrame(columns=['Group','Variable', 'N', 'NMISS', 'MEAN', 'VAR', 'STDDEV', 'SE', 'MIN', 'MAX'])
+    # out = pd.DataFrame(columns=['Group','Variable', 'N', 'NMISS', 'MEAN', 'VAR', 'STDDEV', 'SE', 'MIN', 'MAX'])
+    out = pd.DataFrame()
     grouped = indata.groupby(byvar, dropna=False, sort=True)
     for keys, sub in grouped:
         if len(byvar) == 1:
@@ -369,7 +346,8 @@ def proc_freq(indata, varlist, byvar=None, weight=None, where=None,
             result = frequency(indata, varlist).drop(columns=['Group']).reset_index(drop=True)
             return result
 
-        out = pd.DataFrame(columns=['Group']+varlist+['Frequency', 'Percent', 'Cumulative_Frequency', 'Cumulative_Percent'])
+        # out = pd.DataFrame(columns=['Group']+varlist+['Frequency', 'Percent', 'Cumulative_Frequency', 'Cumulative_Percent'])
+        out = pd.DataFrame()
         grouped = indata.groupby(byvar, dropna=False, sort=True)
         for keys, sub in grouped:
             if len(byvar) == 1:
@@ -469,9 +447,10 @@ def grab_datainfo(indata, metadata=None, output_dir=False, filename='datainfo.tx
 
     print('-- datainfo export complete.')
 
-def main():
+
+if __name__ == '__main__':
     testdt = pd.DataFrame({
-        'id'              : [0,1,2,3,4,5],
+        'id'              : [0, 1, 2, 3, 4, 5],
         'age'             : [30, 10, 40, 30, 60, 80],
         'gender'          : ['male','male','male','female','female','female'],
         'osat'            : [np.nan, 9,6,8, 8, 10],
@@ -483,9 +462,6 @@ def main():
         "segment"         : [np.nan, 1,1,2,2,2],
         "segment_txt"     : [np.nan, "mass", "mass", "middle", "middle", "middle"]
     })
-    proc_freq(testdt, ['attr03_filter', 'attr_03'], byvar='gender')
-    print('='*80)
-    proc_means(testdt, ['osat', 'attr_01', 'attr_02', 'attr_03'], weight='wb', byvar='segment_txt')
-        
-if __name__ == '__main__':
-    main()
+    proc_freq(testdt, ['segment', 'attr03_filter', 'attr_03'])
+    # print('='*80+'\n')
+    # proc_means(testdt, ['osat', 'attr_01', 'attr_02', 'attr_03'], weight='wb')
