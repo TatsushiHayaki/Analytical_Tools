@@ -41,7 +41,7 @@ with(DF,cor.test(base, diff))
 with(DF,cor.test(base, diff))
 -1/sqrt(2)
 
-####### 3. simulation for J.D. Power's index model  #######
+####### 3. simulation assuming JDP's index model  #######
 ## one-factor model with three attributes
 library(dplyr)
 set.seed(100)
@@ -145,3 +145,4 @@ C <- integrate(f, min(xx), max(xx))$value
 p.unscaled <- integrate(f, v, max(xx))$value
 p.scaled <- p.unscaled / C
 p.scaled
+
