@@ -1,11 +1,11 @@
 """
-Last update: Jan-1-2026
-Owner: Tatsushi Hayaki
+Last update: Mar-21-2026
+Author: Tatsushi Hayaki
 
 # ToDo: Make 'Q1', 'Q3', 'Median', 'Kurt', 'Skew', 'Range', and other options available
 # ToDo: Address issues for datetime columns
 """
-__version__ = '1.2.10'
+#%%
 import numpy as np
 import pandas as pd
 import os
@@ -18,35 +18,24 @@ def print_control(func):
     When noprint=False is specified (by default), the wrapped function
     will print the result(s) in a well-formatted manner.
     """
-    # def nan_ints(df):
-    #     """
-    #     Converts float/object columns to nullable integer types
-    #     (i.e., pandas.Int64Dtype) for display when safe to do so.
-    #     Columns containing decimal values will not be converted
-    #     even if they have a float data type.
-    #     """
-    #     df = df.copy()
-    #     varlist = list(df.columns)
-    #     varlist = [v for v in varlist if v not in ('MIN', 'MAX')] # excluding columns you don't apply the function to
-    #     for var in varlist:
-    #         is_float = 'float' in str(df[var].dtype)
-    #         is_object = 'object' in str(df[var].dtype)
-    #         if (is_float or is_object):
-    #             df[var] = df[var].astype("Int64", errors='ignore')
-    #     return df
     def nan_ints(df):
+        """
+        Converts float/object columns to nullable integer types
+        (i.e., pandas.Int64Dtype) for display when safe to do so.
+        Columns containing decimal values will not be converted
+        even if they have a float data type.
+        """
         df = df.copy()
         varlist = list(df.columns)
         varlist = [v for v in varlist if v not in ('MIN', 'MAX')] # excluding columns you don't apply the function to
         for var in varlist:
-            s = pd.to_numeric(df[var], errors='coerce')
-            if s.notna().any():
-                if (s.dropna() % 1 == 0).all():
-                    df[var] = s.astype("Int64")
-                else:
-                    df[var] = s
-            else:
-                df[var] = s
+            is_float = 'float' in str(df[var].dtype)
+            is_object = 'object' in str(df[var].dtype)
+            if (is_float or is_object):
+                try:
+                    df[var] = df[var].astype("Int64", errors='ignore')
+                except Exception:
+                    print(f"Failed to convert column '{var}' to nullable integer type.")
         return df
 
     list_output = True
@@ -104,7 +93,7 @@ def proc_means(indata, varlist, byvar=None, weight=None, where=None,
     Mimics the behavior of the standard `PROC MEANS` procedure in SAS
     (currently does not support CLASS and other statement).
 
-    Available statistic keywords for the `items` parameter:
+    Available statistic keywords list for the `items` parameter:
     ['N', 'NMISS', 'MEAN', 'VAR', 'STDDEV', 'SE', 'MIN', 'MAX'].
 
     Parameters:
@@ -142,9 +131,8 @@ def proc_means(indata, varlist, byvar=None, weight=None, where=None,
     For the computation of weighted standard error, the keyword `STDERR` in `PROC MEANS` in SAS
     is available only when `vardef=`DF`. In contrast, by specifying `vardef=WDF` or `vardef=WGT`,
     this function computes the standard error by dividing the variance by the number of observations
-    rather than by the sum of weights. In SPSS, by default the weighted standard error is defined by
+    rather than by the sum of weights. SPSS, by default, computes the weighted standard error defined by
     sqrt(variance / sum(weight)), which we find often yields unrealistic results.
-
     If the weight variable contains missing values, weighted statistics may not be computed correctly.
     """
     indata = indata.copy()
@@ -162,7 +150,6 @@ def proc_means(indata, varlist, byvar=None, weight=None, where=None,
         byvar = [byvar]
 
     def statistics(indata, varlist, group_label='ALL'):
-        # outdata = pd.DataFrame(columns=['Group', 'Variable', 'N', 'NMISS', 'MEAN', 'VAR', 'STDDEV', 'SE', 'MIN', 'MAX'])
         outdata = pd.DataFrame()
         for var in varlist:
             ma = np.ma.MaskedArray(indata[var], mask=indata[var].isna())
@@ -210,7 +197,6 @@ def proc_means(indata, varlist, byvar=None, weight=None, where=None,
         result = statistics(indata, varlist)[['Group', 'Variable'] + items]
         return result
 
-    # out = pd.DataFrame(columns=['Group','Variable', 'N', 'NMISS', 'MEAN', 'VAR', 'STDDEV', 'SE', 'MIN', 'MAX'])
     out = pd.DataFrame()
     grouped = indata.groupby(byvar, dropna=False, sort=True)
     for keys, sub in grouped:
@@ -231,7 +217,7 @@ def proc_means(indata, varlist, byvar=None, weight=None, where=None,
 
 @print_control
 def proc_freq(indata, varlist, byvar=None, weight=None, where=None,
-              list_output=True, noprint=False
+              list_output=True, noprint=False, order_freq=False
               ):
     """
     Mimics the behavior of the standard `PROC FREQ` procedure in SAS
@@ -262,8 +248,10 @@ def proc_freq(indata, varlist, byvar=None, weight=None, where=None,
             by segment;
             where filter_a=2 AND filter_b=1;
         run;
-    '''
-    Note: If a weight is missing, the corresponding observation is excluded from the calculation.
+    
+    Note:
+    -----
+    If a weight is missing, the corresponding observation is excluded from the calculation.
     """
     indata = indata.copy()
     if weight is None:
@@ -301,6 +289,8 @@ def proc_freq(indata, varlist, byvar=None, weight=None, where=None,
                 .reset_index(name="Frequency")
                 .sort_values(varlist, na_position="first")
             )
+        if order_freq:
+            result = result.sort_values('Frequency', ascending=False)
         result['Percent'] = (result['Frequency'] / result['Frequency'].sum()*100)
         result['Cumulative_Frequency'] = result['Frequency'].cumsum()
         result['Cumulative_Percent'] = result['Percent'].cumsum()
@@ -346,7 +336,6 @@ def proc_freq(indata, varlist, byvar=None, weight=None, where=None,
             result = frequency(indata, varlist).drop(columns=['Group']).reset_index(drop=True)
             return result
 
-        # out = pd.DataFrame(columns=['Group']+varlist+['Frequency', 'Percent', 'Cumulative_Frequency', 'Cumulative_Percent'])
         out = pd.DataFrame()
         grouped = indata.groupby(byvar, dropna=False, sort=True)
         for keys, sub in grouped:
@@ -447,7 +436,7 @@ def grab_datainfo(indata, metadata=None, output_dir=False, filename='datainfo.tx
 
     print('-- datainfo export complete.')
 
-
+#%%
 if __name__ == '__main__':
     testdt = pd.DataFrame({
         'id'              : [0, 1, 2, 3, 4, 5],
@@ -462,6 +451,8 @@ if __name__ == '__main__':
         "segment"         : [np.nan, 1,1,2,2,2],
         "segment_txt"     : [np.nan, "mass", "mass", "middle", "middle", "middle"]
     })
-    proc_freq(testdt, ['segment', 'attr03_filter', 'attr_03'])
-    # print('='*80+'\n')
-    # proc_means(testdt, ['osat', 'attr_01', 'attr_02', 'attr_03'], weight='wb')
+    proc_means(testdt, ['osat', 'attr_01', 'attr_02', 'attr_03'], byvar='segment_txt', weight='wb', where='age>=30', noprint=False)
+
+    import seaborn as sns
+    df = sns.load_dataset('titanic')
+    proc_freq(df, ['deck', "alive"], list_output=False, noprint=False)
